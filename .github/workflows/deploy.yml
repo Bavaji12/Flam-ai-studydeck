@@ -35,6 +35,8 @@ jobs:
 
       - name: Build
         run: npm run build
+        env:
+          VITE_API_URL: https://flam-ai-studydeck.onrender.com
 
       - name: Setup GitHub Pages
         uses: actions/configure-pages@v5
