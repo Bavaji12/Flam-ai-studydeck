@@ -7,11 +7,12 @@ dotenv.config()
 
 const app = express()
 
-// Render provides PORT automatically.
-// 3001 is used for local development.
+// --------------------------------------------------
+// Server configuration
+// --------------------------------------------------
+
 const PORT = Number(process.env.PORT) || 3001
 
-// IMPORTANT:
 // Render requires the server to listen on 0.0.0.0.
 const HOST = '0.0.0.0'
 
@@ -24,6 +25,49 @@ const __dirname = path.dirname(__filename)
 
 const projectRoot = path.join(__dirname, '..')
 const distPath = path.join(projectRoot, 'dist')
+
+// --------------------------------------------------
+// CORS
+// --------------------------------------------------
+
+// Allow the deployed GitHub Pages frontend and local
+// Vite development frontend to call this API.
+
+const allowedOrigins = [
+  'https://bavaji12.github.io',
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+]
+
+app.use((req, res, next) => {
+  const origin = req.headers.origin
+
+  if (origin && allowedOrigins.includes(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin)
+  }
+
+  res.setHeader(
+    'Access-Control-Allow-Methods',
+    'GET, POST, OPTIONS'
+  )
+
+  res.setHeader(
+    'Access-Control-Allow-Headers',
+    'Content-Type, Authorization'
+  )
+
+  res.setHeader(
+    'Access-Control-Max-Age',
+    '86400'
+  )
+
+  // Browser sends this before some cross-origin requests.
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(204)
+  }
+
+  next()
+})
 
 // --------------------------------------------------
 // Middleware
@@ -155,8 +199,8 @@ Rules:
     const retryDelays = [1000, 2500]
 
     for (
-      let attempt = 1;
-      attempt <= maxAttempts;
+      let attempt = 1
+      attempt <= maxAttempts
       attempt++
     ) {
       const controller = new AbortController()
