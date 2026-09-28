@@ -12,8 +12,6 @@ const app = express()
 // --------------------------------------------------
 
 const PORT = Number(process.env.PORT) || 3001
-
-// Render requires the server to listen on 0.0.0.0.
 const HOST = '0.0.0.0'
 
 // --------------------------------------------------
@@ -29,9 +27,6 @@ const distPath = path.join(projectRoot, 'dist')
 // --------------------------------------------------
 // CORS
 // --------------------------------------------------
-
-// Allow the deployed GitHub Pages frontend and local
-// Vite development frontend to call this API.
 
 const allowedOrigins = [
   'https://bavaji12.github.io',
@@ -61,7 +56,6 @@ app.use((req, res, next) => {
     '86400'
   )
 
-  // Browser sends this before some cross-origin requests.
   if (req.method === 'OPTIONS') {
     return res.sendStatus(204)
   }
@@ -193,16 +187,14 @@ Rules:
     // Gemini request with retry handling
     // ------------------------------------------------
 
-    let response
+    let response = null
 
     const maxAttempts = 3
     const retryDelays = [1000, 2500]
 
-    for (
-      let attempt = 1
-      attempt <= maxAttempts
-      attempt++
-    ) {
+    let attempt = 1
+
+    while (attempt <= maxAttempts) {
       const controller = new AbortController()
 
       const timeout = setTimeout(() => {
@@ -253,23 +245,24 @@ ${prompt.trim()}`,
           response.status === 503 &&
           attempt < maxAttempts
         ) {
+          const delay = retryDelays[attempt - 1]
+
           console.log(
-            `Gemini returned 503. Retrying in ${retryDelays[attempt - 1]}ms...`
+            `Gemini returned 503. Retrying in ${delay}ms...`
           )
 
           await new Promise((resolve) => {
-            setTimeout(
-              resolve,
-              retryDelays[attempt - 1]
-            )
+            setTimeout(resolve, delay)
           })
+
+          attempt += 1
 
           continue
         }
 
         break
       } catch (error) {
-        if (error.name === 'AbortError') {
+        if (error?.name === 'AbortError') {
           console.error(
             'Gemini request timed out.'
           )
@@ -416,9 +409,7 @@ ${prompt.trim()}`,
     let parsedResult
 
     try {
-      parsedResult = JSON.parse(
-        generatedText
-      )
+      parsedResult = JSON.parse(generatedText)
     } catch (error) {
       console.error(
         'Invalid JSON returned by Gemini:'
@@ -439,7 +430,8 @@ ${prompt.trim()}`,
 
     if (
       !parsedResult ||
-      typeof parsedResult !== 'object'
+      typeof parsedResult !== 'object' ||
+      Array.isArray(parsedResult)
     ) {
       return res.status(502).json({
         success: false,
@@ -493,9 +485,7 @@ ${prompt.trim()}`,
       })
     }
 
-    for (
-      const card of parsedResult.flashcards
-    ) {
+    for (const card of parsedResult.flashcards) {
       if (
         !card ||
         typeof card.question !== 'string' ||
@@ -526,9 +516,7 @@ ${prompt.trim()}`,
       })
     }
 
-    for (
-      const question of parsedResult.quiz
-    ) {
+    for (const question of parsedResult.quiz) {
       if (
         !question ||
         typeof question.question !== 'string' ||
@@ -714,8 +702,7 @@ server.on(
 server.on(
   'listening',
   () => {
-    const address =
-      server.address()
+    const address = server.address()
 
     console.log(
       'Server listening:',
