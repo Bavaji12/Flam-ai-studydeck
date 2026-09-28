@@ -6,14 +6,28 @@ import { fileURLToPath } from 'url'
 dotenv.config()
 
 const app = express()
-const PORT = process.env.PORT || 3001
 
-// Resolve project paths for serving the React production build
+// Render provides PORT automatically.
+// 3001 is used for local development.
+const PORT = Number(process.env.PORT) || 3001
+
+// IMPORTANT:
+// Render requires the server to listen on 0.0.0.0.
+const HOST = '0.0.0.0'
+
+// --------------------------------------------------
+// Resolve project paths
+// --------------------------------------------------
+
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
 const projectRoot = path.join(__dirname, '..')
 const distPath = path.join(projectRoot, 'dist')
+
+// --------------------------------------------------
+// Middleware
+// --------------------------------------------------
 
 app.use(express.json({ limit: '100kb' }))
 
@@ -28,7 +42,7 @@ app.use(express.static(distPath))
 // --------------------------------------------------
 
 app.get('/api/health', (req, res) => {
-  res.json({
+  res.status(200).json({
     success: true,
     message: 'StudyDeck backend is running',
   })
@@ -42,18 +56,21 @@ app.post('/api/generate', async (req, res) => {
   try {
     const { prompt } = req.body
 
-    // --------------------------------------------------
+    // ------------------------------------------------
     // Validate input
-    // --------------------------------------------------
+    // ------------------------------------------------
 
-    if (!prompt || typeof prompt !== 'string' || !prompt.trim()) {
+    if (
+      !prompt ||
+      typeof prompt !== 'string' ||
+      !prompt.trim()
+    ) {
       return res.status(400).json({
         success: false,
         error: 'Please enter a topic or study notes.',
       })
     }
 
-    // Prevent excessively large requests
     if (prompt.length > 12000) {
       return res.status(400).json({
         success: false,
@@ -61,9 +78,9 @@ app.post('/api/generate', async (req, res) => {
       })
     }
 
-    // --------------------------------------------------
-    // API key is ONLY available on the backend
-    // --------------------------------------------------
+    // ------------------------------------------------
+    // Get Gemini API key
+    // ------------------------------------------------
 
     const apiKey = process.env.GEMINI_API_KEY
 
@@ -76,9 +93,9 @@ app.post('/api/generate', async (req, res) => {
       })
     }
 
-    // --------------------------------------------------
-    // Prompt for structured study content
-    // --------------------------------------------------
+    // ------------------------------------------------
+    // Gemini system instruction
+    // ------------------------------------------------
 
     const systemInstruction = `
 You are an educational content generator.
@@ -128,20 +145,20 @@ Rules:
 - Base the content on the user's study input.
 `
 
-    // --------------------------------------------------
+    // ------------------------------------------------
     // Gemini request with retry handling
-    // --------------------------------------------------
+    // ------------------------------------------------
 
     let response
 
-    // Retry temporary 503 errors up to 3 times.
     const maxAttempts = 3
-
-    // 1 second after first failure,
-    // 2.5 seconds after second failure.
     const retryDelays = [1000, 2500]
 
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    for (
+      let attempt = 1;
+      attempt <= maxAttempts;
+      attempt++
+    ) {
       const controller = new AbortController()
 
       const timeout = setTimeout(() => {
@@ -149,6 +166,10 @@ Rules:
       }, 30000)
 
       try {
+        console.log(
+          `Sending Gemini request. Attempt ${attempt}/${maxAttempts}`
+        )
+
         response = await fetch(
           'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent',
           {
@@ -183,71 +204,97 @@ ${prompt.trim()}`,
           }
         )
 
-        // --------------------------------------------------
-        // Retry temporary Gemini capacity errors
-        // --------------------------------------------------
-
-        if (response.status === 503 && attempt < maxAttempts) {
+        // Retry temporary Gemini capacity errors.
+        if (
+          response.status === 503 &&
+          attempt < maxAttempts
+        ) {
           console.log(
             `Gemini returned 503. Retrying in ${retryDelays[attempt - 1]}ms...`
           )
 
           await new Promise((resolve) => {
-            setTimeout(resolve, retryDelays[attempt - 1])
+            setTimeout(
+              resolve,
+              retryDelays[attempt - 1]
+            )
           })
 
           continue
         }
 
-        // Either successful or a non-retryable response
         break
       } catch (error) {
         if (error.name === 'AbortError') {
-          console.error('Gemini request timed out.')
+          console.error(
+            'Gemini request timed out.'
+          )
 
           return res.status(504).json({
             success: false,
-            error: 'The AI request took too long. Please try again.',
+            error:
+              'The AI request took too long. Please try again.',
           })
         }
 
-        console.error('Gemini network error:', error)
+        console.error(
+          'Gemini network error:',
+          error
+        )
 
         return res.status(502).json({
           success: false,
-          error: 'Could not connect to the AI service.',
+          error:
+            'Could not connect to the AI service.',
         })
       } finally {
         clearTimeout(timeout)
       }
     }
 
-    // --------------------------------------------------
-    // Make sure we received a response
-    // --------------------------------------------------
+    // ------------------------------------------------
+    // Make sure Gemini responded
+    // ------------------------------------------------
 
     if (!response) {
-      console.error('Gemini did not return a response.')
+      console.error(
+        'Gemini did not return a response.'
+      )
 
       return res.status(502).json({
         success: false,
-        error: 'The AI service did not return a response.',
+        error:
+          'The AI service did not return a response.',
       })
     }
 
-    // --------------------------------------------------
+    // ------------------------------------------------
     // Handle Gemini API errors
-    // --------------------------------------------------
+    // ------------------------------------------------
 
     if (!response.ok) {
       const errorText = await response.text()
 
-      console.error('================ GEMINI ERROR ================')
-      console.error('STATUS:', response.status)
-      console.error('ERROR:', errorText)
-      console.error('================================================')
+      console.error(
+        '================ GEMINI ERROR ================'
+      )
 
-      let googleMessage = 'Unknown Gemini API error.'
+      console.error(
+        'STATUS:',
+        response.status
+      )
+
+      console.error(
+        'ERROR:',
+        errorText
+      )
+
+      console.error(
+        '================================================'
+      )
+
+      let googleMessage =
+        'Unknown Gemini API error.'
 
       try {
         const errorData = JSON.parse(errorText)
@@ -256,10 +303,9 @@ ${prompt.trim()}`,
           errorData?.error?.message ||
           googleMessage
       } catch {
-        // Keep fallback error message
+        // Keep fallback message.
       }
 
-      // Give the user a cleaner message for temporary overload.
       if (response.status === 503) {
         return res.status(503).json({
           success: false,
@@ -270,36 +316,43 @@ ${prompt.trim()}`,
 
       return res.status(502).json({
         success: false,
-        error: `Gemini API error (${response.status}): ${googleMessage}`,
+        error:
+          `Gemini API error (${response.status}): ${googleMessage}`,
       })
     }
 
-    // --------------------------------------------------
+    // ------------------------------------------------
     // Parse Gemini HTTP response
-    // --------------------------------------------------
+    // ------------------------------------------------
 
     let data
 
     try {
       data = await response.json()
     } catch (error) {
-      console.error('Could not parse Gemini HTTP response:', error)
+      console.error(
+        'Could not parse Gemini HTTP response:',
+        error
+      )
 
       return res.status(502).json({
         success: false,
-        error: 'The AI service returned an invalid response.',
+        error:
+          'The AI service returned an invalid response.',
       })
     }
 
-    // --------------------------------------------------
+    // ------------------------------------------------
     // Extract generated text
-    // --------------------------------------------------
+    // ------------------------------------------------
 
     const generatedText =
       data?.candidates?.[0]?.content?.parts?.[0]?.text
 
     if (!generatedText) {
-      console.error('Gemini returned no generated text:')
+      console.error(
+        'Gemini returned no generated text.'
+      )
 
       console.error(
         JSON.stringify(data, null, 2)
@@ -307,31 +360,38 @@ ${prompt.trim()}`,
 
       return res.status(502).json({
         success: false,
-        error: 'The AI returned an empty response.',
+        error:
+          'The AI returned an empty response.',
       })
     }
 
-    // --------------------------------------------------
+    // ------------------------------------------------
     // Parse AI-generated JSON
-    // --------------------------------------------------
+    // ------------------------------------------------
 
     let parsedResult
 
     try {
-      parsedResult = JSON.parse(generatedText)
+      parsedResult = JSON.parse(
+        generatedText
+      )
     } catch (error) {
-      console.error('Invalid JSON returned by Gemini:')
+      console.error(
+        'Invalid JSON returned by Gemini:'
+      )
+
       console.error(generatedText)
 
       return res.status(502).json({
         success: false,
-        error: 'The AI returned invalid JSON. Please try again.',
+        error:
+          'The AI returned invalid JSON. Please try again.',
       })
     }
 
-    // --------------------------------------------------
-    // Basic server-side validation
-    // --------------------------------------------------
+    // ------------------------------------------------
+    // Validate top-level result
+    // ------------------------------------------------
 
     if (
       !parsedResult ||
@@ -339,48 +399,59 @@ ${prompt.trim()}`,
     ) {
       return res.status(502).json({
         success: false,
-        error: 'The AI returned an invalid study deck.',
+        error:
+          'The AI returned an invalid study deck.',
       })
     }
 
+    // ------------------------------------------------
     // Validate topic
+    // ------------------------------------------------
+
     if (
       typeof parsedResult.topic !== 'string' ||
       !parsedResult.topic.trim()
     ) {
       return res.status(502).json({
         success: false,
-        error: 'The AI response is missing a valid topic.',
+        error:
+          'The AI response is missing a valid topic.',
       })
     }
 
+    // ------------------------------------------------
+    // Validate summary
+    // ------------------------------------------------
+
+    if (
+      typeof parsedResult.summary !== 'string'
+    ) {
+      return res.status(502).json({
+        success: false,
+        error:
+          'The AI response is missing a valid summary.',
+      })
+    }
+
+    // ------------------------------------------------
     // Validate flashcards
+    // ------------------------------------------------
+
     if (
       !Array.isArray(parsedResult.flashcards) ||
-      parsedResult.flashcards.length === 0
+      parsedResult.flashcards.length < 5 ||
+      parsedResult.flashcards.length > 8
     ) {
       return res.status(502).json({
         success: false,
-        error: 'The AI response contains no flashcards.',
+        error:
+          'The AI response must contain 5 to 8 flashcards.',
       })
     }
 
-    // Validate quiz
-    if (
-      !Array.isArray(parsedResult.quiz) ||
-      parsedResult.quiz.length === 0
+    for (
+      const card of parsedResult.flashcards
     ) {
-      return res.status(502).json({
-        success: false,
-        error: 'The AI response contains no quiz questions.',
-      })
-    }
-
-    // --------------------------------------------------
-    // Validate flashcards
-    // --------------------------------------------------
-
-    for (const card of parsedResult.flashcards) {
       if (
         !card ||
         typeof card.question !== 'string' ||
@@ -390,16 +461,30 @@ ${prompt.trim()}`,
       ) {
         return res.status(502).json({
           success: false,
-          error: 'The AI returned an invalid flashcard.',
+          error:
+            'The AI returned an invalid flashcard.',
         })
       }
     }
 
-    // --------------------------------------------------
-    // Validate quiz questions
-    // --------------------------------------------------
+    // ------------------------------------------------
+    // Validate quiz
+    // ------------------------------------------------
 
-    for (const question of parsedResult.quiz) {
+    if (
+      !Array.isArray(parsedResult.quiz) ||
+      parsedResult.quiz.length !== 5
+    ) {
+      return res.status(502).json({
+        success: false,
+        error:
+          'The AI response must contain exactly 5 quiz questions.',
+      })
+    }
+
+    for (
+      const question of parsedResult.quiz
+    ) {
       if (
         !question ||
         typeof question.question !== 'string' ||
@@ -418,12 +503,17 @@ ${prompt.trim()}`,
       ) {
         return res.status(502).json({
           success: false,
-          error: 'The AI returned an invalid quiz question.',
+          error:
+            'The AI returned an invalid quiz question.',
         })
       }
 
-      // Make sure answer matches one option
-      if (!question.options.includes(question.answer)) {
+      // The answer must exactly match one option.
+      if (
+        !question.options.includes(
+          question.answer
+        )
+      ) {
         return res.status(502).json({
           success: false,
           error:
@@ -432,16 +522,19 @@ ${prompt.trim()}`,
       }
     }
 
-    // --------------------------------------------------
+    // ------------------------------------------------
     // Send validated result to frontend
-    // --------------------------------------------------
+    // ------------------------------------------------
 
-    return res.json({
+    return res.status(200).json({
       success: true,
       data: parsedResult,
     })
   } catch (error) {
-    console.error('Server error:', error)
+    console.error(
+      'Unexpected server error:',
+      error
+    )
 
     return res.status(500).json({
       success: false,
@@ -457,20 +550,92 @@ ${prompt.trim()}`,
 
 app.get(/.*/, (req, res) => {
   res.sendFile(
-    path.join(distPath, 'index.html')
+    path.join(
+      distPath,
+      'index.html'
+    )
   )
 })
+
+// --------------------------------------------------
+// Process-level diagnostics
+// --------------------------------------------------
+
+process.on(
+  'uncaughtException',
+  (error) => {
+    console.error(
+      'UNCAUGHT EXCEPTION:',
+      error
+    )
+  }
+)
+
+process.on(
+  'unhandledRejection',
+  (error) => {
+    console.error(
+      'UNHANDLED REJECTION:',
+      error
+    )
+  }
+)
+
+process.on(
+  'exit',
+  (code) => {
+    console.log(
+      `Node process exiting with code: ${code}`
+    )
+  }
+)
 
 // --------------------------------------------------
 // Start server
 // --------------------------------------------------
 
+console.log(
+  '======================================'
+)
+
+console.log(
+  'Starting StudyDeck backend...'
+)
+
+console.log(
+  `PORT: ${PORT}`
+)
+
+console.log(
+  `HOST: ${HOST}`
+)
+
+console.log(
+  '======================================'
+)
+
 const server = app.listen(
   PORT,
-  '127.0.0.1',
+  HOST,
   () => {
     console.log(
-      `StudyDeck server running on http://127.0.0.1:${PORT}`
+      '======================================'
+    )
+
+    console.log(
+      'StudyDeck backend is running'
+    )
+
+    console.log(
+      `Listening on ${HOST}:${PORT}`
+    )
+
+    console.log(
+      `Health check: http://${HOST}:${PORT}/api/health`
+    )
+
+    console.log(
+      '======================================'
     )
   }
 )
@@ -479,12 +644,38 @@ const server = app.listen(
 // Server errors
 // --------------------------------------------------
 
-server.on('error', (error) => {
-  console.error('SERVER ERROR:', error)
-})
+server.on(
+  'error',
+  (error) => {
+    console.error(
+      '======================================'
+    )
+
+    console.error(
+      'SERVER ERROR'
+    )
+
+    console.error(error)
+
+    console.error(
+      '======================================'
+    )
+  }
+)
 
 // --------------------------------------------------
-// Keep development/production process alive
+// Server listening diagnostics
 // --------------------------------------------------
 
-setInterval(() => {}, 1000)
+server.on(
+  'listening',
+  () => {
+    const address =
+      server.address()
+
+    console.log(
+      'Server listening:',
+      address
+    )
+  }
+)
